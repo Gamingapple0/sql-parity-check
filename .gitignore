@@ -4,3 +4,8 @@ __pycache__/
 node_modules/
 .vscode/
 .idea/
+bin/
+obj/
+cdk.out/
+*.lsn
+TestResults/
