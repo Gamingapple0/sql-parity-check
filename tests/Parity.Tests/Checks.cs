@@ -84,6 +84,16 @@ public class Checks(Engines engines)
             "SELECT '' IS NULL",
             SqlServer: "0", Postgres: "0", Babelfish: "0"),
 
+        // Instances where Babelfish does not mimic SQL Server's behaviour
+        new(9, "datetime2(7) beyond microseconds",
+            "SELECT CONVERT(varchar(30), CAST('2026-01-01T10:00:00.1234567' AS datetime2(7)), 121)",
+            "SELECT to_char(CAST('2026-01-01 10:00:00.1234567' AS timestamp), 'YYYY-MM-DD HH24:MI:SS.US')",
+            SqlServer: "2026-01-01 10:00:00.1234567", Postgres: "2026-01-01 10:00:00.123457", Babelfish: "2026-01-01 10:00:00.123457"),
+
+        new(10, "DATALENGTH of nvarchar",
+            "SELECT DATALENGTH(N'abc')",
+            "SELECT octet_length('abc')",
+            SqlServer: "6", Postgres: "3", Babelfish: "3"),
     ];
 
     public static TheoryData<int, string, Engine> Cases()
