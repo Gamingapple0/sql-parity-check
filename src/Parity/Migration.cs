@@ -16,30 +16,53 @@ public static class Migration
     public static void Copy(string source, string target)
     {
         using var src = (SqlConnection)Db.Open(source);
-        using var dst = (NpgsqlConnection)Db.Open(target);
+        using var dst = Db.Open(target);
 
-        Db.Exec(dst, $"TRUNCATE {string.Join(", ", Tables)}");
+        // Empty the target children first so foreign keys hold; the copy can be rerun.
+        // ponytail: DELETE, not TRUNCATE, so one statement works on all engines; fine at this size.
+        foreach (var table in Tables.Reverse()) Db.Exec(dst, $"DELETE FROM {table}");
         foreach (var table in Tables)
         {
             var sw = Stopwatch.StartNew();
             using var cmd = new SqlCommand($"SELECT * FROM {table} ORDER BY id", src);
             using var r = cmd.ExecuteReader();
-            var cols = string.Join(", ", Enumerable.Range(0, r.FieldCount).Select(r.GetName));
-            using var w = dst.BeginBinaryImport($"COPY {table} ({cols}) FROM STDIN (FORMAT BINARY)");
-            long rows = 0;
-            while (r.Read())
+            var rows = dst switch
             {
-                w.StartRow();
-                for (var i = 0; i < r.FieldCount; i++)
-                {
-                    if (r.IsDBNull(i)) w.WriteNull();
-                    else w.Write(r.GetValue(i));
-                }
-                rows++;
-            }
-            w.Complete();
+                NpgsqlConnection pg => CopyToPostgres(pg, table, r),
+                SqlConnection ms => CopyToSqlServer(ms, table, r),
+                _ => throw new NotSupportedException(dst.GetType().Name),
+            };
             Console.WriteLine($"{table,-12} {rows,8} rows copied   {sw.ElapsedMilliseconds,6} ms");
         }
+    }
+
+    // PostgreSQL: binary COPY, the fastest load path.
+    static long CopyToPostgres(NpgsqlConnection pg, string table, SqlDataReader r)
+    {
+        var cols = string.Join(", ", Enumerable.Range(0, r.FieldCount).Select(r.GetName));
+        using var w = pg.BeginBinaryImport($"COPY {table} ({cols}) FROM STDIN (FORMAT BINARY)");
+        long rows = 0;
+        while (r.Read())
+        {
+            w.StartRow();
+            for (var i = 0; i < r.FieldCount; i++)
+            {
+                if (r.IsDBNull(i)) w.WriteNull();
+                else w.Write(r.GetValue(i));
+            }
+            rows++;
+        }
+        w.Complete();
+        return rows;
+    }
+
+    // SQL Server, RDS for SQL Server or Babelfish on port 1433: bulk copy over TDS.
+    static long CopyToSqlServer(SqlConnection ms, string table, SqlDataReader r)
+    {
+        using var bulk = new SqlBulkCopy(ms) { DestinationTableName = table };
+        for (var i = 0; i < r.FieldCount; i++) bulk.ColumnMappings.Add(r.GetName(i), r.GetName(i));
+        bulk.WriteToServer(r);
+        return bulk.RowsCopied64;
     }
 
     // Parity = same row count and same hash per table. Rows are read in integer key order

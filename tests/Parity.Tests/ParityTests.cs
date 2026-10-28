@@ -23,4 +23,22 @@ public class ParityTests(Engines engines)
         Assert.False(Migration.Compare(engines.SqlServer, engines.Postgres));
     }
 
+    // The posted migration in miniature: self-managed SQL Server to a managed SQL Server
+    // (here a second database), then to PostgreSQL with Babelfish through port 1433.
+    [Fact]
+    public void Two_hops_reach_Babelfish_and_both_ports_see_the_data()
+    {
+        Migration.Copy(engines.SqlServer, engines.SqlServerHop1);
+        Assert.True(Migration.Compare(engines.SqlServer, engines.SqlServerHop1));
+
+        Migration.Copy(engines.SqlServerHop1, engines.Babelfish);
+        Assert.True(Migration.Compare(engines.SqlServerHop1, engines.Babelfish));
+
+        // Old code keeps talking T-SQL on 1433; new code reads the same rows as plain PostgreSQL on 5432.
+        using var tsql = Db.Open(engines.Babelfish);
+        using var pg = Db.Open(engines.BabelfishPostgres);
+        var schema = Db.Scalar(pg, "SELECT table_schema FROM information_schema.tables WHERE table_name = 'line_items'");
+        Assert.Equal(Convert.ToInt64(Db.Scalar(tsql, "SELECT COUNT(*) FROM line_items")),
+                     Db.Scalar(pg, $"SELECT count(*) FROM {schema}.line_items"));
+    }
 }
