@@ -2,28 +2,30 @@
 
 Same data, same queries, two databases: where do SQL Server and PostgreSQL silently give different answers?
 
-A migration can move every row correctly and still change behaviour. No errors, no failed jobs, just a query that returns something different after cutover. This repo runs the same checks on SQL Server, PostgreSQL and Babelfish (PostgreSQL with SQL Server compatibility) and records what each engine actually does.
+A migration can move every row correctly and still change behaviour. No errors, no failed jobs, just a query that returns something different after cutover. This repo runs the same checks on SQL Server, PostgreSQL and Babelfish (PostgreSQL with SQL Server compatibility), records what each engine actually does, and proves a PostgreSQL fix where one exists.
 
 It's a learning project on SQL Server to PostgreSQL migrations, built with [Claude Code](https://claude.com/claude-code).
 
 ## Status
 
-Checks 1 to 8 run on all three engines. Next: PostgreSQL fixes for each difference, then a parity tool to copy data between engines and prove the copy matches.
+Ten checks run on all three engines, and five PostgreSQL remedies are proven against live SQL Server. Next: a parity tool to copy data between engines and prove the copy matches.
 
 ## Results so far
 
-| # | Difference | SQL Server | PostgreSQL | Babelfish |
-|---|---|---|---|---|
-| 1 | Case in `=` | `'Anshu' = 'anshu'` true | false | true |
-| 2 | Trailing spaces in `=` | equal | not equal | equal |
-| 3 | `LEN('abc  ')` | 3 | 5 | 3 |
-| 4 | Two NULLs in a unique index | rejected | accepted | rejected |
-| 5 | NULLs in `ORDER BY` | first | last | first |
-| 6 | `CAST(2.5 AS int)` | 2 | 3 | 2 |
-| 7 | `datetime` with `.001` | `.000` | `.001` | `.000` |
-| 8 | Control: `''` is NULL | no | no | no |
+| # | Difference | SQL Server | PostgreSQL | Babelfish | PostgreSQL remedy |
+|---|---|---|---|---|---|
+| 1 | Case in `=` | `'Anshu' = 'anshu'` true | false | true | Nondeterministic ICU collation on the column |
+| 2 | Trailing spaces in `=` | equal | not equal | equal | Detect only |
+| 3 | `LEN('abc  ')` | 3 | 5 | 3 | Detect only |
+| 4 | Two NULLs in a unique index | rejected | accepted | rejected | `NULLS NOT DISTINCT` |
+| 5 | NULLs in `ORDER BY` | first | last | first | `NULLS FIRST` |
+| 6 | `CAST(2.5 AS int)` | 2 | 3 | 2 | `trunc(x)::int` |
+| 7 | `datetime` with `.001` | `.000` | `.001` | `.000` | `datetime2(6)` mapped to `timestamp(6)` |
+| 8 | Control: `''` is NULL | no | no | no | Not needed |
+| 9 | `datetime2(7)` | 7 digits kept | rounded to 6 | rounded to 6 | None: PostgreSQL stops at microseconds |
+| 10 | `DATALENGTH(N'abc')` | 6 | 3 | 3 | Detect only |
 
-Babelfish matched SQL Server on every check so far.
+Babelfish matched SQL Server on checks 1 to 8. Probing further found 9 and 10, where it behaves like PostgreSQL underneath. A remedy passes only when PostgreSQL with the fix returns exactly what SQL Server returns.
 
 ## Run the checks
 
@@ -33,7 +35,7 @@ Needs Docker and the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet test
 ```
 
-Testcontainers starts SQL Server 2022, PostgreSQL 16 and Babelfish (`jonathanpotts/babelfishpg`), loads the sample data and runs 24 tests: each check asked in T-SQL and in PostgreSQL SQL, with the answer every engine gave pinned as the expected result. The first run pulls about 3.5 GB of images.
+Testcontainers starts SQL Server 2022, PostgreSQL 16 and Babelfish (`jonathanpotts/babelfishpg`), loads the sample data and runs 35 tests: each check asked in T-SQL and in PostgreSQL SQL with the answer every engine gave pinned as the expected result (30), plus the five remedies. The first run pulls about 3.5 GB of images.
 
 ## Sample data
 
@@ -45,7 +47,7 @@ Generic accounting data: 50 customers, 200 invoices, 600 line items, generated b
 |---|---|
 | `sql/` | Schema per engine and the seed script |
 | `src/Parity/` | Database helpers (the parity tool will live here) |
-| `tests/Parity.Tests/` | Engine fixture and the checks |
+| `tests/Parity.Tests/` | Engine fixture, the checks and remedies |
 | `DIFFERENCES.md` | Each difference: what happens, why it's silent, how to detect it |
 
 ## Decisions made
