@@ -60,6 +60,9 @@ public static class Migration
     static long CopyToSqlServer(SqlConnection ms, string table, SqlDataReader r)
     {
         using var bulk = new SqlBulkCopy(ms) { DestinationTableName = table };
+        using var v = new SqlCommand("SELECT @@VERSION", ms);
+        if (!((string)v.ExecuteScalar()!).Contains("Babelfish", StringComparison.OrdinalIgnoreCase))
+            bulk.ColumnOrderHints.Add("id", SortOrder.Ascending);
         for (var i = 0; i < r.FieldCount; i++) bulk.ColumnMappings.Add(r.GetName(i), r.GetName(i));
         bulk.WriteToServer(r);
         return bulk.RowsCopied64;
