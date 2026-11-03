@@ -7,5 +7,5 @@ node_modules/
 bin/
 obj/
 cdk.out/
-*.lsn
+cdk.context.json
 TestResults/
